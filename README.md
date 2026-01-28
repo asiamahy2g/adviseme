@@ -17,3 +17,5 @@ streamlit run adviseme.py
 
 ## Deployment
 The app is automatically deployed to AWS ECS via CodePipeline when changes are pushed to main branch.
+
+Pipeline includes: Source → Build → Deploy stages.
