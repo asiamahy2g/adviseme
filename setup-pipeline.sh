@@ -2,7 +2,7 @@
 
 # Variables
 REPO_NAME="advisor-app"
-GITHUB_REPO="https://github.com/YOUR_USERNAME/advisor-app.git"  # Update with your GitHub repo
+GITHUB_REPO="https://github.com/asiamahy2g/adviseme.git"  # Updated with your GitHub repo
 AWS_ACCOUNT_ID="540738452774"
 AWS_REGION="us-east-1"
 
