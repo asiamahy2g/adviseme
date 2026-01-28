@@ -11,7 +11,7 @@ st.subheader("Academic Advisor Assistant")
 
 client = openai.OpenAI(
     api_key=os.getenv("POE_API_KEY"),
-    base_url="https://api.poe.com/v1",
+    base_url="https://api.poe.com/v1"
 )
 
 def encode_file(file_bytes):
