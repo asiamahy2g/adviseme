@@ -10,6 +10,39 @@ AI-powered academic advisor application built with Streamlit and deployed on AWS
 - CI/CD pipeline with CodePipeline
 - Auto-scaling with 2 replicas
 
+## Authentication
+
+The app uses Streamlit-Authenticator for user authentication.
+
+### Default Login Credentials
+
+| Username | Password |
+|----------|----------|
+| `admin`  | `admin123` |
+
+### Adding New Users
+
+1. Generate a password hash:
+```bash
+python3 -c "import bcrypt; print(bcrypt.hashpw('YOUR_PASSWORD'.encode(), bcrypt.gensalt()).decode())"
+```
+
+2. Add the user to `auth_config.yaml`:
+```yaml
+credentials:
+  usernames:
+    newuser:
+      email: newuser@example.com
+      name: New User
+      password: <paste_hash_here>
+```
+
+### Changing Passwords
+
+1. Generate a new hash using the command above
+2. Replace the password hash in `auth_config.yaml`
+3. Restart the app
+
 ## Local Development
 
 ### Prerequisites
@@ -41,10 +74,11 @@ streamlit run adviseme.py
 The app will be available at http://localhost:8501
 
 ### Testing Locally
-1. Upload a student academic progress PDF
-2. Upload a course schedule PDF  
-3. Click "Generate Academic Advice"
-4. The AI will analyze both documents and provide personalized recommendations
+1. Sign in with username `admin` and password `admin123`
+2. Upload a student academic progress PDF
+3. Upload a course schedule PDF
+4. Click "Generate Academic Advice"
+5. The AI will analyze both documents and provide personalized recommendations
 
 ## AWS ECS Deployment
 
