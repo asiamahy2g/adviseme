@@ -7,6 +7,7 @@ AI-powered academic advisor application built with Streamlit and deployed on AWS
 - Streamlit web interface
 - AWS ECS deployment
 - CI/CD pipeline with CodePipeline
+- Auto-scaling with 2 replicas
 
 ## Local Development
 ```bash
