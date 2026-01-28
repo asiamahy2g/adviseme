@@ -5,7 +5,7 @@ AI-powered academic advisor application built with Streamlit and deployed on AWS
 ## Features
 - Academic advising using AI
 - Streamlit web interface
-- AWS ECS deployment
+- AWS ECS deployment with Fargate
 - CI/CD pipeline with CodePipeline
 - Auto-scaling with 2 replicas
 
