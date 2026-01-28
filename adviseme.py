@@ -1,5 +1,5 @@
 import streamlit as st
-import os, openai, base64, tempfile
+import os, requests, base64, json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -9,10 +9,9 @@ st.set_page_config(page_title="AdviseMe", page_icon="🎓")
 st.title("🎓 AdviseMe")
 st.subheader("Academic Advisor Assistant")
 
-client = openai.OpenAI(
-    api_key=os.getenv("POE_API_KEY"),
-    base_url="https://api.poe.com/v1"
-)
+# POE API configuration
+POE_API_KEY = os.getenv("POE_API_KEY")
+POE_BASE_URL = "https://api.poe.com/v1"
 
 def encode_file(file_bytes):
     return base64.b64encode(file_bytes).decode("utf-8")
@@ -66,14 +65,29 @@ if st.button("Generate Academic Advice", type="primary"):
             ]
             
             try:
-                response = client.chat.completions.create(
-                    model="Claude-Sonnet-4",
-                    messages=messages
+                headers = {
+                    "Authorization": f"Bearer {POE_API_KEY}",
+                    "Content-Type": "application/json"
+                }
+                
+                payload = {
+                    "model": "Claude-Sonnet-4",
+                    "messages": messages
+                }
+                
+                response = requests.post(
+                    f"{POE_BASE_URL}/chat/completions",
+                    headers=headers,
+                    json=payload
                 )
                 
-                st.success("Analysis complete!")
-                st.markdown("### Academic Advice Email")
-                st.text_area("Generated Email", response.choices[0].message.content, height=400)
+                if response.status_code == 200:
+                    result = response.json()
+                    st.success("Analysis complete!")
+                    st.markdown("### Academic Advice Email")
+                    st.text_area("Generated Email", result['choices'][0]['message']['content'], height=400)
+                else:
+                    st.error(f"API Error: {response.status_code} - {response.text}")
                 
             except Exception as e:
                 st.error(f"Error generating advice: {str(e)}")
