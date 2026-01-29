@@ -1,0 +1,15 @@
+credentials:
+  usernames:
+    admin:
+      email: admin@adviseme.edu
+      name: Admin User
+      password: $2b$12$pC.EQ8xp5YvvEjkAUUul.ORzbP9VT5vqFrggTiUiMsHuhkkzTasPS
+
+cookie:
+  expiry_days: 30
+  key: adviseme_auth_key_change_in_production
+  name: adviseme_auth
+
+preauthorized:
+  emails:
+    - admin@adviseme.edu
