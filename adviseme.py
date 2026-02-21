@@ -31,8 +31,8 @@ if st.button("Generate Academic Advice", type="primary"):
     if progress_file and schedule_file:
         with st.spinner("Analyzing documents and generating advice..."):
             # Encode files
-            progress_data = encode_file(progress_file.read())
-            schedule_data = encode_file(schedule_file.read())
+            progress_data = encode_file(progress_file.getvalue())
+            schedule_data = encode_file(schedule_file.getvalue())
             
             # Academic advisor prompt
             system_prompt = """You are a seasoned professor and an animal science professor at UAPB. A student sent you an email inquiring about their academic progress and the courses they need to complete in Spring 2026. I have attached his academic progress. Go through it and make a list of the courses she/he needs to take. I have attached the course schedule for spring 2026. Based on the student's needs, schedule their classes for him. She/he will need 15 - 18 credits. Let's assume she/he passes all current courses in the Fall 2025. Prepare an email for her/him, first telling him about his academic progress and also the classes he needs to register for in the spring semester. Make it clear, concise and straight to the point."""
