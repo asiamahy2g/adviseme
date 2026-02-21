@@ -110,3 +110,7 @@ dmypy.json
 
 # Capabilities file
 capabilities.txt
+
+.kiro/
+test_file_upload_bug.py
+test_preservation_properties.py
