@@ -17,15 +17,11 @@ def encode_file(file_bytes):
     return base64.b64encode(file_bytes).decode("utf-8")
 
 # File upload section
-col1, col2 = st.columns(2)
+st.markdown("**Student Academic Progress**")
+progress_file = st.file_uploader("Upload academic progress PDF", type="pdf", key="progress")
 
-with col1:
-    st.markdown("**Student Academic Progress**")
-    progress_file = st.file_uploader("Upload academic progress PDF", type="pdf", key="progress")
-
-with col2:
-    st.markdown("**Course Schedule**")
-    schedule_file = st.file_uploader("Upload course schedule PDF", type="pdf", key="schedule")
+st.markdown("**Course Schedule**")
+schedule_file = st.file_uploader("Upload course schedule PDF", type="pdf", key="schedule")
 
 if st.button("Generate Academic Advice", type="primary"):
     if progress_file and schedule_file:
