@@ -2,10 +2,80 @@ import streamlit as st
 import os, requests, base64, json, io
 from dotenv import load_dotenv
 from datetime import datetime
+import logging
+import auth
+import database
+import history
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
 st.set_page_config(page_title="AdviseMe", page_icon="🎓")
+
+# Initialize database on startup - handle failures gracefully
+try:
+    database.initialize_database()
+    # Verify database was created successfully by checking if file exists
+    if not os.path.exists(database.DB_PATH):
+        st.warning("⚠️ History features are temporarily unavailable. You can still generate academic advice.")
+        logger.warning("Database initialization failed - continuing without history features")
+except Exception as e:
+    st.warning("⚠️ History features are temporarily unavailable. You can still generate academic advice.")
+    logger.error(f"Database initialization error: {e}")
+
+# Authentication check - show login page if not authenticated
+# This check runs on every page interaction (every Streamlit rerun) to enforce session timeout
+# The is_authenticated() function checks if the session has exceeded 8 hours and auto-logs out if expired
+if not auth.is_authenticated():
+    st.title("🎓 AdviseMe - Login")
+    st.markdown("### Professor Authentication")
+    
+    # Display timeout message if session expired
+    if st.session_state.get('session_timeout', False):
+        st.warning("⏱️ Your session has expired. Please log in again.")
+        # Clear the timeout flag
+        del st.session_state['session_timeout']
+    else:
+        st.markdown("Please log in to access the academic advising system.")
+    
+    # Login form
+    with st.form("login_form"):
+        username = st.text_input("Username", placeholder="Enter your username")
+        password = st.text_input("Password", type="password", placeholder="Enter your password")
+        submit_button = st.form_submit_button("Login", type="primary")
+        
+        if submit_button:
+            if not username or not password:
+                st.error("Please enter both username and password")
+            else:
+                # Check for lockout
+                lockout_remaining = auth.get_lockout_remaining_time(username)
+                if lockout_remaining:
+                    st.error(f"Account temporarily locked. Try again in {lockout_remaining} minutes.")
+                else:
+                    # Attempt authentication
+                    with st.spinner("Authenticating..."):
+                        professor_id = auth.authenticate_user(username, password)
+                        
+                        if professor_id:
+                            # Authentication successful
+                            auth.create_session(professor_id, username)
+                            st.success("Login successful! Redirecting...")
+                            st.rerun()
+                        else:
+                            # Check if now locked out
+                            lockout_remaining = auth.get_lockout_remaining_time(username)
+                            if lockout_remaining:
+                                st.error(f"Too many failed attempts. Account locked for {lockout_remaining} minutes.")
+                            else:
+                                st.error("Invalid username or password")
+    
+    st.markdown("---")
+    st.caption("AdviseMe - Academic Advising System | UAPB")
+    st.stop()  # Stop execution here if not authenticated
 
 # Banner image - full width but limited height
 if os.path.exists("banner.jpg"):
@@ -35,6 +105,162 @@ st.subheader("Your Academic Companion")
 
 # Sidebar
 with st.sidebar:
+    # Display authenticated username
+    st.markdown(f"**Logged in as:** {st.session_state.get('username', 'Unknown')}")
+    st.markdown("---")
+    
+    # Class Schedule Management - upload once, reuse for multiple students
+    st.markdown("**📅 Class Schedule Manager**")
+    
+    # Check if a schedule is already loaded
+    if 'stored_schedule_file' in st.session_state and st.session_state.get('stored_schedule_file'):
+        # Display currently loaded schedule info
+        schedule_info = st.session_state.get('stored_schedule_info', {})
+        st.success(f"✓ Schedule loaded: {schedule_info.get('semester', '')} {schedule_info.get('year', '')}")
+        st.caption(f"File: {schedule_info.get('filename', 'Unknown')}")
+        
+        # Button to clear/change schedule
+        if st.button("🔄 Change Schedule", use_container_width=True):
+            del st.session_state['stored_schedule_file']
+            del st.session_state['stored_schedule_info']
+            st.rerun()
+    else:
+        # Upload new schedule
+        st.markdown("Upload a class schedule to reuse for multiple students:")
+        
+        with st.form("schedule_upload_form"):
+            new_schedule_file = st.file_uploader("Course Schedule PDF", type="pdf", key="new_schedule")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                schedule_semester = st.selectbox("Semester", ["Spring", "Summer", "Fall"], index=0, key="schedule_semester")
+            with col2:
+                schedule_year = st.number_input("Year", min_value=2024, max_value=2030, value=2026, step=1, key="schedule_year")
+            
+            upload_button = st.form_submit_button("📁 Save Schedule", type="primary")
+            
+            if upload_button:
+                if new_schedule_file:
+                    # Store schedule in session state
+                    st.session_state['stored_schedule_file'] = new_schedule_file.getvalue()
+                    st.session_state['stored_schedule_info'] = {
+                        'filename': new_schedule_file.name,
+                        'semester': schedule_semester,
+                        'year': schedule_year,
+                        'size': new_schedule_file.size
+                    }
+                    st.success(f"✓ Schedule saved for {schedule_semester} {schedule_year}")
+                    st.rerun()
+                else:
+                    st.error("Please upload a schedule file")
+    
+    st.markdown("---")
+    
+    # History dropdown - above "About" expander
+    st.markdown("**📚 Advising History**")
+    professor_id = st.session_state.get('professor_id')
+    
+    if professor_id:
+        # Get history options - handle database unavailability
+        # Show spinner only if operation takes longer than expected
+        with st.spinner("Loading history..."):
+            history_options = history.get_history_dropdown_options(professor_id)
+        
+        # Check if database is unavailable (decorator returns empty list)
+        if history_options is None or (isinstance(history_options, list) and len(history_options) == 0):
+            st.info("History features temporarily unavailable")
+            logger.warning("History dropdown unavailable - database error")
+        else:
+            # Create dropdown with formatted entries
+            display_texts = [option[0] for option in history_options]
+            session_ids = [option[1] for option in history_options]
+            
+            # Use selectbox for history dropdown
+            selected_index = st.selectbox(
+                "Select a previous session to reload:",
+                range(len(display_texts)),
+                format_func=lambda i: display_texts[i],
+                key="history_dropdown",
+                label_visibility="collapsed"
+            )
+            
+            # Handle selection
+            selected_session_id = session_ids[selected_index]
+            
+            # Check if a valid session was selected and if it's different from current
+            if selected_session_id is not None:
+                # Use a button to trigger reload to avoid constant reloading
+                if st.button("📂 Load Selected Session", use_container_width=True):
+                    with st.spinner("Loading session..."):
+                        success = history.reload_session(selected_session_id, professor_id)
+                        if success:
+                            # Show notification with timestamp
+                            loaded_timestamp = st.session_state.get('loaded_session_timestamp', 'Unknown time')
+                            st.success(f"✅ Loaded session from {loaded_timestamp}")
+                            st.rerun()
+                        elif success is False:
+                            # Session not found or error already displayed by reload_session
+                            pass
+                        else:
+                            # success is None - database unavailable
+                            st.error("Unable to load session - history features temporarily unavailable")
+    else:
+        st.info("No advising history yet")
+    
+    st.markdown("---")
+    
+    # Admin interface - only visible to admin users
+    if auth.is_admin():
+        with st.expander("🔐 Admin - Create Professor Account", expanded=False):
+            st.markdown("**Create New Professor Account**")
+            st.caption("Only administrators can create new professor accounts.")
+            
+            with st.form("create_professor_form"):
+                new_username = st.text_input(
+                    "Username",
+                    placeholder="Enter username (alphanumeric, hyphens, underscores)",
+                    help="Username must contain only letters, numbers, hyphens, and underscores"
+                )
+                new_password = st.text_input(
+                    "Password",
+                    type="password",
+                    placeholder="Enter password (minimum 8 characters)",
+                    help="Password must be at least 8 characters long"
+                )
+                confirm_password = st.text_input(
+                    "Confirm Password",
+                    type="password",
+                    placeholder="Re-enter password"
+                )
+                
+                create_button = st.form_submit_button("Create Account", type="primary")
+                
+                if create_button:
+                    # Validate inputs
+                    if not new_username or not new_password:
+                        st.error("❌ Please enter both username and password")
+                    elif new_password != confirm_password:
+                        st.error("❌ Passwords do not match")
+                    else:
+                        try:
+                            # Attempt to create professor account
+                            success = database.create_professor(new_username, new_password)
+                            
+                            if success:
+                                st.success(f"✅ Professor account '{new_username}' created successfully!")
+                                logger.info(f"Admin {st.session_state.get('username')} created professor account: {new_username}")
+                            else:
+                                st.error("❌ Failed to create account. Username may already exist.")
+                        except ValueError as e:
+                            # Validation error from create_professor
+                            st.error(f"❌ Validation error: {str(e)}")
+                        except Exception as e:
+                            # Database error or other unexpected error
+                            st.error(f"❌ Error creating account: {str(e)}")
+                            logger.error(f"Error creating professor account: {e}")
+        
+        st.markdown("---")
+    
     with st.expander("📖 About", expanded=False):
         st.markdown("""
         **AdviseMe** helps academic advisors at UAPB create personalized course schedules for students.
@@ -100,6 +326,13 @@ with st.sidebar:
         """)
     
     st.markdown("---")
+    
+    # Logout button at bottom of sidebar
+    if st.button("🚪 Logout", type="secondary", use_container_width=True):
+        auth.logout()
+        st.rerun()
+    
+    st.markdown("---")
     st.caption("Version 2.0 | March 2026")
 
 # POE API configuration
@@ -126,17 +359,42 @@ progress_file = st.file_uploader("Upload academic progress PDF", type="pdf", key
 if progress_file:
     st.caption(f"✓ {progress_file.name} ({progress_file.size / 1024:.1f} KB)")
 
-st.markdown("**Course Schedule**")
-schedule_file = st.file_uploader("Upload course schedule PDF", type="pdf", key="schedule")
-if schedule_file:
-    st.caption(f"✓ {schedule_file.name} ({schedule_file.size / 1024:.1f} KB)")
-
-# Semester and year input
-col1, col2 = st.columns(2)
-with col1:
-    semester = st.selectbox("Semester", ["Spring", "Summer", "Fall"], index=0)
-with col2:
-    year = st.number_input("Year", min_value=2024, max_value=2030, value=2026, step=1)
+# Check if schedule is already stored in session
+if 'stored_schedule_file' in st.session_state and st.session_state.get('stored_schedule_file'):
+    # Use stored schedule
+    schedule_info = st.session_state.get('stored_schedule_info', {})
+    st.markdown("**Course Schedule**")
+    st.info(f"✓ Using saved schedule: {schedule_info.get('semester', '')} {schedule_info.get('year', '')} - {schedule_info.get('filename', '')}")
+    st.caption("To change the schedule, use the Schedule Manager in the sidebar")
+    
+    # Get semester and year from stored schedule
+    semester = schedule_info.get('semester', 'Spring')
+    year = schedule_info.get('year', 2026)
+    
+    # Create a mock file object from stored bytes
+    class StoredFile:
+        def __init__(self, data, name):
+            self.data = data
+            self.name = name
+        def getvalue(self):
+            return self.data
+    
+    schedule_file = StoredFile(st.session_state['stored_schedule_file'], schedule_info.get('filename', 'schedule.pdf'))
+else:
+    # No stored schedule - require upload
+    st.markdown("**Course Schedule**")
+    schedule_file = st.file_uploader("Upload course schedule PDF", type="pdf", key="schedule")
+    if schedule_file:
+        st.caption(f"✓ {schedule_file.name} ({schedule_file.size / 1024:.1f} KB)")
+    
+    st.info("💡 Tip: Use the Schedule Manager in the sidebar to upload a schedule once and reuse it for multiple students")
+    
+    # Semester and year input
+    col1, col2 = st.columns(2)
+    with col1:
+        semester = st.selectbox("Semester", ["Spring", "Summer", "Fall"], index=0)
+    with col2:
+        year = st.number_input("Year", min_value=2024, max_value=2030, value=2026, step=1)
 
 if st.button("Generate Academic Advice", type="primary"):
     if progress_file and schedule_file:
@@ -297,7 +555,45 @@ IMPORTANT NOTES:
                     st.session_state['alternative2_schedule'] = alternative2_schedule
                     st.session_state['semester_info'] = f"{semester} {year}"
                     
-                    st.success("Analysis complete! Multiple schedule options generated.")
+                    # Automatically save session to database
+                    try:
+                        # Extract student name from progress file
+                        student_name = history.extract_student_name(progress_file.name)
+                        
+                        # Get professor ID from session state
+                        professor_id = st.session_state.get('professor_id')
+                        
+                        # Save the advising session
+                        if professor_id:
+                            save_success = database.save_advising_session(
+                                professor_id=professor_id,
+                                student_name=student_name,
+                                semester=semester,
+                                year=year,
+                                email_content=email_content,
+                                recommended_schedule=recommended_schedule,
+                                alternative1_schedule=alternative1_schedule,
+                                alternative2_schedule=alternative2_schedule
+                            )
+                            
+                            if save_success:
+                                st.success("Analysis complete! Multiple schedule options generated.")
+                            elif save_success is False:
+                                # Database error occurred (decorator returned False)
+                                st.success("Analysis complete! Multiple schedule options generated.")
+                                st.warning("⚠️ Session saved to display but could not be saved to history database.")
+                            else:
+                                # save_success is None - should not happen with current decorator
+                                st.success("Analysis complete! Multiple schedule options generated.")
+                                st.warning("⚠️ Session saved to display but could not be saved to history database.")
+                        else:
+                            st.success("Analysis complete! Multiple schedule options generated.")
+                            st.warning("⚠️ Session saved to display but could not be saved to history (no professor ID).")
+                    except Exception as e:
+                        # Display advice even if database save fails
+                        st.success("Analysis complete! Multiple schedule options generated.")
+                        st.warning(f"⚠️ Session saved to display but could not be saved to history: {str(e)}")
+                        logger.error(f"Failed to save advising session: {e}")
                     
                     # Create tabs for email and schedules
                     tabs = ["📧 Email", "⭐ Recommended Schedule"]
