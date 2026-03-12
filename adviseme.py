@@ -359,6 +359,15 @@ progress_file = st.file_uploader("Upload academic progress PDF", type="pdf", key
 if progress_file:
     st.caption(f"✓ {progress_file.name} ({progress_file.size / 1024:.1f} KB)")
 
+# Create a mock file object class for stored schedules
+class StoredFile:
+    def __init__(self, data, name):
+        self.data = data
+        self.name = name
+        self.size = len(data)
+    def getvalue(self):
+        return self.data
+
 # Check if schedule is already stored in session
 if 'stored_schedule_file' in st.session_state and st.session_state.get('stored_schedule_file'):
     # Use stored schedule
@@ -371,30 +380,15 @@ if 'stored_schedule_file' in st.session_state and st.session_state.get('stored_s
     semester = schedule_info.get('semester', 'Spring')
     year = schedule_info.get('year', 2026)
     
-    # Create a mock file object from stored bytes
-    class StoredFile:
-        def __init__(self, data, name):
-            self.data = data
-            self.name = name
-        def getvalue(self):
-            return self.data
-    
+    # Create file object from stored bytes
     schedule_file = StoredFile(st.session_state['stored_schedule_file'], schedule_info.get('filename', 'schedule.pdf'))
 else:
-    # No stored schedule - require upload
+    # No stored schedule - show error message
     st.markdown("**Course Schedule**")
-    schedule_file = st.file_uploader("Upload course schedule PDF", type="pdf", key="schedule")
-    if schedule_file:
-        st.caption(f"✓ {schedule_file.name} ({schedule_file.size / 1024:.1f} KB)")
-    
-    st.info("💡 Tip: Use the Schedule Manager in the sidebar to upload a schedule once and reuse it for multiple students")
-    
-    # Semester and year input
-    col1, col2 = st.columns(2)
-    with col1:
-        semester = st.selectbox("Semester", ["Spring", "Summer", "Fall"], index=0)
-    with col2:
-        year = st.number_input("Year", min_value=2024, max_value=2030, value=2026, step=1)
+    st.error("⚠️ No class schedule uploaded. Please use the Schedule Manager in the sidebar to upload a schedule first.")
+    schedule_file = None
+    semester = None
+    year = None
 
 if st.button("Generate Academic Advice", type="primary"):
     if progress_file and schedule_file:
@@ -407,62 +401,130 @@ if st.button("Generate Academic Advice", type="primary"):
             credit_range = f"{st.session_state.get('min_credits', 15)}-{st.session_state.get('max_credits', 18)}"
             system_prompt = f"""You are an academic advisor at UAPB. A student sent you an email inquiring about their academic progress and the courses they need to complete in {semester} {year}. I have attached their academic progress and the course schedule for {semester.lower()} {year}.
 
+CRITICAL INSTRUCTION - READ THE ACADEMIC PROGRESS PDF CAREFULLY:
+The academic progress PDF contains a list of courses with STATUS indicators. You MUST read these status indicators EXACTLY as they appear in the PDF.
+
+COURSE STATUS DEFINITIONS (from Workday academic progress reports):
+- "Not Satisfied" or "NOT SATISFIED" = Course is REQUIRED but NOT YET COMPLETED - ONLY these courses should be scheduled
+- "Satisfied" or "SATISFIED" = Course is COMPLETED - DO NOT schedule these
+- "In Progress" or "IN PROGRESS" = Course is CURRENTLY being taken - DO NOT schedule these
+- "Waived" or "WAIVED" = Course requirement was waived - DO NOT schedule these
+- "Transferred" or "TRANSFERRED" = Course credit transferred from another institution - DO NOT schedule these
+
+IMPORTANT: If a student has NO courses with "Not Satisfied" status, they have completed all required courses. In this case:
+- State in the email that the student has satisfied all degree requirements
+- DO NOT create any course schedules
+- Congratulate them on completing their program requirements
+
 Your task:
-1. Analyze the student's academic progress and identify courses with status "Not Satisfied" - these are the courses they need to take
-2. IMPORTANT: Do NOT recommend courses that are "In Progress" - only recommend courses with "Not Satisfied" status
-3. CRITICAL: Only recommend courses that are REQUIRED for the student's program completion - do not suggest electives or non-required courses unless necessary to meet credit requirements
-4. Based on the student's needs and the available course schedule, create schedule options ({credit_range} credits each) for {semester} {year}
-5. ONLY create alternative schedules if there are genuinely different viable combinations of required courses - if there's only one logical schedule, provide only the recommended schedule
-6. Assume the student passes all current courses in the previous semester
-7. Rank the schedules by quality (consider: time distribution, prerequisite flow, workload balance, avoiding conflicts)
+1. FIRST: Carefully read the academic progress PDF and identify the STATUS of each course
+2. COUNT: How many courses have "Not Satisfied" status? If ZERO, the student is done with requirements.
+3. CRITICAL FILTERING RULES:
+   - ONLY select courses with "Not Satisfied" status (exact text match)
+   - DO NOT select courses with "Satisfied" status (already completed)
+   - DO NOT select courses with "In Progress" status (currently taking)
+   - DO NOT select courses with "Waived" or "Transferred" status
+4. SCHEDULE CONFLICT PREVENTION:
+   - Carefully check the day/time for each course in the uploaded class schedule PDF
+   - DO NOT schedule courses that have overlapping times on the same day
+   - Ensure there are NO time conflicts between any courses in the same schedule
+   - If two required courses conflict, choose the most critical one and note the conflict in your explanation
+5. SEMESTER ALIGNMENT:
+   - Use ONLY the courses available in the {semester} {year} class schedule PDF provided
+   - DO NOT recommend courses from other semesters
+   - The email and schedules must reference {semester} {year} specifically
+6. REQUIRED COURSES ONLY:
+   - Only recommend courses that are REQUIRED for the student's program completion
+   - Do not suggest electives or non-required courses unless necessary to meet minimum credit requirements
+7. SCHEDULE OPTIONS:
+   - Create schedule options with {credit_range} credits each for {semester} {year}
+   - ONLY create alternative schedules if there are genuinely different viable combinations of required courses
+   - If there's only one logical schedule, provide only the recommended schedule
+8. QUALITY RANKING:
+   - Rank schedules by quality considering: time distribution, prerequisite flow, workload balance, and NO scheduling conflicts
+   - Assume the student passes all current "In Progress" courses from the previous semester
 
 Please provide outputs in this EXACT format:
 
+CASE 1: IF THE STUDENT HAS "NOT SATISFIED" COURSES:
+
 OUTPUT 1 - EMAIL:
 Write a clear, concise, professional email to the student that:
-- Summarizes their academic progress
-- Mentions that you've created multiple schedule options for them to choose from
-- Provides any important notes or considerations
+- Addresses the student professionally
+- Specifically mentions {semester} {year} in the email body
+- Summarizes their academic progress based on the "Not Satisfied" courses identified
+- Mentions that you've created schedule options for {semester} {year}
+- Notes any important considerations (conflicts, prerequisites, course availability)
+- Maintains a supportive and encouraging tone
 
 OUTPUT 2 - RECOMMENDED SCHEDULE (BEST OPTION):
 Create a markdown table with: | Course Code | Course Name | Credits | Day/Time | Instructor |
-Add a brief explanation (2-3 sentences) of why this is the recommended option.
+- Ensure NO time conflicts between courses
+- Only include courses from the {semester} {year} class schedule PDF
+- Add a brief explanation (2-3 sentences) of why this is the recommended option
 
 OUTPUT 3 - ALTERNATIVE SCHEDULE 1 (only if genuinely different viable combination exists):
 Create a markdown table with the same format.
-Add a brief explanation of the key differences from the recommended schedule.
+- Ensure NO time conflicts between courses
+- Only include courses from the {semester} {year} class schedule PDF
+- Add a brief explanation of the key differences from the recommended schedule
 
 OUTPUT 4 - ALTERNATIVE SCHEDULE 2 (only if a third genuinely different viable combination exists):
 Create a markdown table with the same format.
-Add a brief explanation of the key differences.
+- Ensure NO time conflicts between courses
+- Only include courses from the {semester} {year} class schedule PDF
+- Add a brief explanation of the key differences
 
 Format your response EXACTLY as follows:
 ---EMAIL---
-[Your email content here]
+[Your email content here - must mention {semester} {year}]
 ---END EMAIL---
 
 ---RECOMMENDED---
-[Brief explanation why this is best]
+[Brief explanation why this is best - confirm no conflicts]
 
-[Your markdown table here]
+[Your markdown table here - courses from {semester} {year} only]
 ---END RECOMMENDED---
 
 ---ALTERNATIVE1---
-[Brief explanation of differences]
+[Brief explanation of differences - confirm no conflicts]
 
-[Your markdown table here]
+[Your markdown table here - courses from {semester} {year} only]
 ---END ALTERNATIVE1---
 
 ---ALTERNATIVE2---
-[Brief explanation of differences]
+[Brief explanation of differences - confirm no conflicts]
 
-[Your markdown table here]
+[Your markdown table here - courses from {semester} {year} only]
 ---END ALTERNATIVE2---
 
-IMPORTANT NOTES:
-- Only include ALTERNATIVE1 and ALTERNATIVE2 sections if there are genuinely different viable combinations of REQUIRED courses
-- If there is only one logical schedule to meet the student's program requirements, provide only the RECOMMENDED schedule section
-- Do not create artificial alternatives by mixing in non-required electives just to have multiple options
+CASE 2: IF THE STUDENT HAS ZERO "NOT SATISFIED" COURSES (all requirements completed):
+
+OUTPUT 1 - EMAIL ONLY:
+Write a congratulatory email that:
+- Congratulates the student on completing all degree requirements
+- Confirms they have no "Not Satisfied" courses remaining
+- Mentions they should contact the registrar about graduation
+- Maintains a warm and celebratory tone
+
+Format your response EXACTLY as follows:
+---EMAIL---
+[Your congratulatory email content here]
+---END EMAIL---
+
+---RECOMMENDED---
+No courses needed - all degree requirements satisfied.
+---END RECOMMENDED---
+
+CRITICAL REMINDERS:
+- READ THE STATUS COLUMN in the academic progress PDF carefully
+- ONLY courses with "Not Satisfied" status from the academic progress PDF
+- If NO "Not Satisfied" courses exist, use CASE 2 format (congratulatory email only)
+- ONLY courses available in the {semester} {year} class schedule PDF
+- NO time conflicts - verify day/time for every course combination
+- Email must specifically reference {semester} {year}
+- Only include ALTERNATIVE1 and ALTERNATIVE2 sections if there are genuinely different viable combinations
+- If there is only one logical schedule to meet requirements, provide only the RECOMMENDED schedule section
 """
             
             # Create message with file attachments
